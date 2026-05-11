@@ -109,6 +109,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚛 Find latest inspection\n"
         "🏢 Identify responsible company\n"
         "📞 Get company details\n\n"
+        "⚠️ *Important Notice*\n"
+        "Company data is based on the latest FMCSA inspection records.\n"
+        "Vehicles may currently operate under a different carrier.\n\n"
         "Choose an option:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         parse_mode="Markdown"
@@ -192,10 +195,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     latest = inspections[0]
     dot = latest.get("dot_number")
-    carrier = get_carrier(dot)
 
-    # 🔥 OUTPUT BASED ON FLOW
-
+    # 🔍 VEHICLE INSPECTION MODE (NO COMPANY INFO)
     if flow == "inspection":
         msg = f"""🚛 *Inspection Result*
 
@@ -205,19 +206,33 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🚚 Truck: {latest.get('unit_license')} ({latest.get('unit_license_state')})
 🔗 Trailer: {latest.get('unit_license2') or 'N/A'}
 """
-    else:
-        msg = "🏢 *Company Information*\n\n"
+        await update.message.reply_text(msg, parse_mode="Markdown")
+        return
+
+    # 🏢 COMPANY LOOKUP MODE
+    carrier = get_carrier(dot)
+
+    msg = "🏢 *Company Information*\n\n"
 
     if carrier:
-        msg += f"""
-📛 Name: {carrier.get('name')}
+        msg += f"""📛 Name: {carrier.get('name')}
 👤 Owner: {carrier.get('owner') or 'N/A'}
 📞 Phone: {carrier.get('phone') or 'N/A'}
 📍 Address: {carrier.get('address')}
 📧 Email: {carrier.get('email') or 'N/A'}
 """
     else:
-        msg += "\n❌ Company info not found"
+        msg += "❌ Company info not found\n"
+
+    # 🔥 DISCLAIMER ONLY FOR COMPANY LOOKUP
+    msg += """
+
+⚠️ *Disclaimer*
+
+This company is identified based on the latest FMCSA inspection record.
+
+The vehicle may currently be operating under a different carrier.
+"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
