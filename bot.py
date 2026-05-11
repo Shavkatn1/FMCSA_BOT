@@ -1,6 +1,5 @@
 import requests
 import os
-BOT_TOKEN = os.getenv("BOT_TOKEN")
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -10,12 +9,13 @@ from telegram.ext import (
     filters
 )
 
-# FMCSA DATASETS
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 INSPECTION_URL = "https://data.transportation.gov/resource/rbkj-cgst.json"
 CARRIER_URL = "https://data.transportation.gov/resource/az4n-8mr2.json"
 
 
-# 🔥 Parse FMCSA date
+# 🔥 Parse date
 def parse_date(date_str):
     months = {
         "JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
@@ -55,18 +55,16 @@ def build_query(mode, text):
         )
 
 
-# 🔎 Get inspection data
+# 🔎 Get inspections
 def get_inspections(query):
     try:
-        url = INSPECTION_URL + query
-        res = requests.get(url, timeout=10)
+        res = requests.get(INSPECTION_URL + query, timeout=10)
         data = res.json()
 
         if not data:
             return []
 
         data.sort(key=lambda x: parse_date(x.get("insp_date", "")), reverse=True)
-
         return data
 
     except Exception as e:
@@ -74,11 +72,10 @@ def get_inspections(query):
         return []
 
 
-# 🏢 Get carrier info
+# 🏢 Get carrier
 def get_carrier(dot):
     try:
-        url = f"{CARRIER_URL}?dot_number={dot}"
-        res = requests.get(url, timeout=10)
+        res = requests.get(f"{CARRIER_URL}?dot_number={dot}", timeout=10)
         data = res.json()
 
         if not data:
@@ -99,81 +96,120 @@ def get_carrier(dot):
         return None
 
 
-# 👋 START MENU
+# 👋 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        ["🔎 VIN Search"],
-        ["🚚 Plate Search"],
-        ["📍 Plate + State"]
+        ["🔍 Vehicle Inspection"],
+        ["🏢 Company Lookup"]
     ]
 
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
     await update.message.reply_text(
-        "👋 *FMCSA Accident Lookup Bot*\n\n"
-        "Select search type:",
-        reply_markup=reply_markup,
+        "👋 *Welcome to FMCSA Accident Lookup Bot*\n\n"
+        "This system helps you:\n"
+        "🚛 Find latest inspection\n"
+        "🏢 Identify responsible company\n"
+        "📞 Get company details\n\n"
+        "Choose an option:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         parse_mode="Markdown"
     )
 
 
-# 🤖 HANDLE USER INPUT
+# 🤖 HANDLE
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
-    # Mode selection
-    if text == "🔎 VIN Search":
-        context.user_data["mode"] = "VIN"
-        await update.message.reply_text("Enter VIN (17 digits):")
+    # MAIN MENU
+    if text == "🔍 Vehicle Inspection":
+        context.user_data["flow"] = "inspection"
+
+        keyboard = [
+            ["🔎 VIN", "🚚 Plate"],
+            ["📍 Plate + State"],
+            ["🔙 Main Menu"]
+        ]
+
+        await update.message.reply_text(
+            "Select search type:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
         return
 
-    if text == "🚚 Plate Search":
+    if text == "🏢 Company Lookup":
+        context.user_data["flow"] = "company"
+
+        keyboard = [
+            ["🔎 VIN", "🚚 Plate"],
+            ["📍 Plate + State"],
+            ["🔙 Main Menu"]
+        ]
+
+        await update.message.reply_text(
+            "Select search type:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+
+    if text == "🔙 Main Menu":
+        await start(update, context)
+        return
+
+    # SEARCH TYPE
+    if text == "🔎 VIN":
+        context.user_data["mode"] = "VIN"
+        await update.message.reply_text("Enter VIN:")
+        return
+
+    if text == "🚚 Plate":
         context.user_data["mode"] = "PLATE"
-        await update.message.reply_text("Enter Plate (e.g. 40713P):")
+        await update.message.reply_text("Enter Plate:")
         return
 
     if text == "📍 Plate + State":
         context.user_data["mode"] = "PLATE_STATE"
-        await update.message.reply_text("Enter Plate + State (e.g. 40713P CA):")
+        await update.message.reply_text("Enter Plate + State (e.g. ABC123 TX):")
         return
 
+    # PROCESS SEARCH
     mode = context.user_data.get("mode")
+    flow = context.user_data.get("flow")
 
     if not mode:
-        await update.message.reply_text("Please choose search type using /start")
+        await update.message.reply_text("Please select option using /start")
         return
 
     query = build_query(mode, text)
 
     if not query:
-        await update.message.reply_text("❌ Invalid format. Try again.")
+        await update.message.reply_text("❌ Invalid format")
         return
 
     inspections = get_inspections(query)
 
     if not inspections:
-        await update.message.reply_text("❌ No inspection found")
+        await update.message.reply_text("❌ No data found")
         return
 
-    # Get latest inspection
     latest = inspections[0]
     dot = latest.get("dot_number")
-
     carrier = get_carrier(dot)
 
-    msg = "🚨 *ACCIDENT LOOKUP RESULT*\n\n"
+    # 🔥 OUTPUT BASED ON FLOW
 
-    msg += f"""📅 Inspection: {latest.get('insp_date')} | {latest.get('report_state')}
+    if flow == "inspection":
+        msg = f"""🚛 *Inspection Result*
+
+📅 {latest.get('insp_date')} | {latest.get('report_state')}
 🏢 DOT: {dot}
 
 🚚 Truck: {latest.get('unit_license')} ({latest.get('unit_license_state')})
 🔗 Trailer: {latest.get('unit_license2') or 'N/A'}
-
 """
+    else:
+        msg = "🏢 *Company Information*\n\n"
 
     if carrier:
-        msg += f"""🏢 *Company Info*
-
+        msg += f"""
 📛 Name: {carrier.get('name')}
 👤 Owner: {carrier.get('owner') or 'N/A'}
 📞 Phone: {carrier.get('phone') or 'N/A'}
@@ -186,7 +222,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# 🚀 RUN BOT
+# 🚀 RUN
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
